@@ -67,13 +67,15 @@ int32 current_songlength;
 unsigned int16 fp_file_entry;
 int1 end_of_directory=0;
 
-#define PLAYER_MODE_STOPPED		0
-#define PLAYER_MODE_SEQUENTIAL	1
-#define PLAYER_MODE_RANDOM		2
-#define PLAYER_MODE_PAUSED		3
-#define PLAYER_MODE_BELL_RND	4
-#define PLAYER_MODE_BELL_SEQ	5
+#define PLAYER_MODE_STOPPED			0
+#define PLAYER_MODE_MUSIC_NO_BELL  	1
+#define PLAYER_MODE_MUSIC_BELL  	2
+#define PLAYER_MODE_BELL_INI		3
+#define PLAYER_MODE_BELL_FIN		4
+#define PLAYER_MODE_PAUSED			5
 
+int1 random_music=0;
+unsigned char current_alarm=0;
 
 int player_mode = PLAYER_MODE_STOPPED;
 int1 player_one_song = 0;
@@ -101,6 +103,10 @@ int state = 0;
 
 int1 enable_sd_check=1;
 void check_clock(int1 f);
+void lcd_printhour();
+void lcd_printready();
+void player_play_bell_ini();
+void player_play_bell_fin();
 
 #include "lcd_4bits.c"
 #include "rtc.c"
@@ -322,9 +328,12 @@ void player_stop()
 	player_mode = PLAYER_MODE_STOPPED;	
 }
 
-void player_play_sequential(int16 track)
+void player_play_sequential(int16 track, int1 bell)
 {
-	player_mode = PLAYER_MODE_SEQUENTIAL;
+	if( bell)
+		player_mode = PLAYER_MODE_MUSIC_BELL;
+	else
+		player_mode = PLAYER_MODE_MUSIC_NO_BELL;
 
 	end_of_directory = seek_track( 	&track,
 									stat_highest_i,
@@ -335,23 +344,27 @@ void player_play_sequential(int16 track)
 	currentsong = track;
 }
 
-void player_play_random()
+void player_play_random(int1 bell)
 {
-	player_mode = PLAYER_MODE_RANDOM;
+	if( bell)
+		player_mode = PLAYER_MODE_MUSIC_BELL;
+	else
+		player_mode = PLAYER_MODE_MUSIC_NO_BELL;
+
 	end_of_directory = seek_rand( 	&current_ccl,
 									&current_songlength );
 
 }
 
-void player_play_bell_seq()
+void player_play_bell_ini()
 {
-	player_mode = PLAYER_MODE_BELL_SEQ;
+	player_mode = PLAYER_MODE_BELL_INI;
 	//volume=VOLUME_BELL;
 }
 
-void player_play_bell_rnd()
+void player_play_bell_fin()
 {
-	player_mode = PLAYER_MODE_BELL_RND;
+	player_mode = PLAYER_MODE_BELL_FIN;
 	//volume=VOLUME_BELL;
 }
 
@@ -359,7 +372,7 @@ void player_end_of_song()
 {
 	switch( player_mode )
 	{
-		case PLAYER_MODE_SEQUENTIAL:
+		case PLAYER_MODE_MUSIC_NO_BELL:
 			//volume=VOLUME_SONG;
 
 			if( player_one_song )
@@ -367,56 +380,66 @@ void player_end_of_song()
 				player_mode = PLAYER_MODE_STOPPED;
 				player_one_song = 0;
 			}
-			else {
-				end_of_directory = seek_next( 	&currentsong,
-												&current_ccl,
-												&current_songlength,
-												end_of_directory );				
-			}
-			if( state == FM_STATE_ALARM_ON)
-				lcd_playing_title();
-			else
+			else 
 			{
-				if( fp_file_entry == 0 )	
-					window_pos = fp_file_entry;
+				if (random_music)
+				{
+					if( player_one_song )
+					{
+						player_mode = PLAYER_MODE_STOPPED;
+						player_one_song = 0;
+					}
+					else 
+					{
+						end_of_directory = seek_rand( 	&current_ccl,
+													&current_songlength );
+					}
+					lcd_playing_title();
+				}
 				else
-					window_pos = fp_file_entry-1;
-				lcd_printtrackpllist();
+				{
+					end_of_directory = seek_next( 	&currentsong,
+													&current_ccl,
+													&current_songlength,
+													end_of_directory );				
+				
+					if( state == FM_STATE_ALARM_ON)
+						lcd_playing_title();
+					else
+					{
+						if( fp_file_entry == 0 )	
+							window_pos = fp_file_entry;
+						else
+							window_pos = fp_file_entry-1;
+						lcd_printtrackpllist();
+					}
+				}
 			}
 			
 			break;
-		case PLAYER_MODE_RANDOM:
-			//volume=VOLUME_SONG;
-			if( player_one_song )
+		case PLAYER_MODE_BELL_INI:
+			if( random_music )
 			{
-				player_mode = PLAYER_MODE_STOPPED;
-				player_one_song = 0;
+				//volume=VOLUME_SONG;
+				player_play_random(true);
+				lcd_playing_title();
 			}
-			else {
-				end_of_directory = seek_rand( 	&current_ccl,
-												&current_songlength );
-
+			else
+			{
+				player_play_sequential(currentsong, true);
+				lcd_playing_title();
 			}
-			lcd_playing_title();
 			break;
-		case PLAYER_MODE_BELL_RND:
-			//volume=VOLUME_SONG;
-			player_play_random();
-			lcd_playing_title();
-			break;
-		case PLAYER_MODE_BELL_SEQ:
-			//volume=VOLUME_SONG;
-			player_play_sequential(currentsong);
-			lcd_playing_title();
+		case PLAYER_MODE_BELL_FIN:
+			state = FM_STATE_CLOCK;
+			lcd_clear();
+			lcd_printhour();
+			lcd_printready();
+			alx[current_alarm].state = ALARM_STATE_OFF;
+			player_mode = PLAYER_MODE_STOPPED;
 			break;
 	}	
 }
-
-
-
-
-
-
 
 void lcd_blinkhour(int f) {
     static int on = 0;
@@ -535,7 +558,7 @@ void lcd_boot_screen() {
 	lcd_putchar('1');
     lcd_putchar('.');
 	lcd_putchar('0');
-	lcd_putchar('8');
+	lcd_putchar('9');
 }
 
 
@@ -557,8 +580,8 @@ void lcd_playing_alarm(int i) {
 void lcd_playing_title() {
 
 
-	if( player_mode == PLAYER_MODE_BELL_SEQ ||
-		player_mode == PLAYER_MODE_BELL_RND )
+	if( player_mode == PLAYER_MODE_BELL_INI ||
+		player_mode == PLAYER_MODE_BELL_FIN )
 	{
 	    lcd_putcmd(0xC6); // Set the cursor in 2nd row, 3rd column
 	    lcd_putchar('B');
@@ -1411,29 +1434,31 @@ void start_program(int i,int1 bell)
 	switch(al[i].on)
 	{
 	case ALARM_OPTION_TRACK:
-		player_play_sequential(al[i].track);
+		player_play_sequential(al[i].track, false);
 		break;
 	case ALARM_OPTION_RND:
-		player_play_random();
+		player_play_random(false);
 		break;
 	case ALARM_OPTION_BELL_TRACK:
+		random_music=0;
 		if(bell)
-			player_play_bell_seq();
+			player_play_bell_ini();
 		else
-			player_play_sequential(al[i].track);
+			player_play_sequential(al[i].track, true);
 		break;
 	case ALARM_OPTION_BELL_RND:
+		random_music=1;
 		if(bell)
-			player_play_bell_rnd();
+			player_play_bell_ini();
 		else
-			player_play_random();
+			player_play_random(true);
 		break;
 	}
 	
 	lcd_clear();
 	lcd_playing_alarm(i);
 	lcd_playing_title();
-
+	current_alarm=i;
 }
 
 void action_play(int1 repeat) {
@@ -1445,7 +1470,8 @@ void action_play(int1 repeat) {
 				current_ccl = fp_dir_entries[fp_file_entry].ccl;
 				current_songlength = fp_dir_entries[fp_file_entry].songlength;		
 				currentsong = fp_dir_entries[fp_file_entry].track;
-				player_mode = PLAYER_MODE_SEQUENTIAL;
+				player_mode = PLAYER_MODE_MUSIC_NO_BELL;
+				random_music=0;
 				state = FM_STATE_PLAYING;
 				play_led = 0;
 				break;
@@ -1472,12 +1498,23 @@ void action_play(int1 repeat) {
 
 void stop_alarm(char i)
 {
-	state = FM_STATE_CLOCK;
-	lcd_clear();
-	lcd_printhour();
-	lcd_printready();
-	alx[i].state = ALARM_STATE_OFF;
-	player_mode = PLAYER_MODE_STOPPED;
+	if( player_mode == PLAYER_MODE_MUSIC_NO_BELL )
+	{
+		state = FM_STATE_CLOCK;
+		lcd_clear();
+		lcd_printhour();
+		lcd_printready();
+		alx[i].state = ALARM_STATE_OFF;
+		player_mode = PLAYER_MODE_STOPPED;
+	}
+	else if( player_mode == PLAYER_MODE_MUSIC_BELL)
+	{
+		player_mode=PLAYER_MODE_BELL_FIN;
+		state = FM_STATE_SKIP;
+		lcd_clear();
+		lcd_playing_alarm(i);
+		lcd_playing_title();
+	}
 
 }
 
@@ -1502,10 +1539,6 @@ void action_stop(int1 repeat) {
 		}
 	}
 }
-
-
-
-
 
 
 void timing_blink() {
@@ -1741,7 +1774,8 @@ void check_clock(int1 bell)
 		{
 			flag_scroll = false;
 
-		    if(  (state == FM_STATE_PLAYER || state == FM_STATE_PLAYING || state == FM_STATE_PAUSED) && get_tit_len(entry)>14 ) 
+		    if(  (state == FM_STATE_PLAYER || state == FM_STATE_PLAYING || state == FM_STATE_PAUSED) && 
+				get_tit_len(entry)>14 && player_mode!=PLAYER_MODE_BELL_FIN) 
 			{
 				if (title_delay)
 					--title_delay;
@@ -1754,7 +1788,8 @@ void check_clock(int1 bell)
 				}
 		    } 
 		
-		    if(  state == FM_STATE_ALT && get_tit_len(entry)>14 ) 
+		    if(  state == FM_STATE_ALT && get_tit_len(entry)>14 
+				&& player_mode!=PLAYER_MODE_BELL_FIN) 
 			{
 				if (title_delay)
 					--title_delay;
@@ -1765,7 +1800,7 @@ void check_clock(int1 bell)
 		    } 
 		
 		
-		    if(  	state == FM_STATE_ALARM_ON && player_mode!=PLAYER_MODE_BELL_RND && player_mode!=PLAYER_MODE_BELL_SEQ && 
+		    if(  	state == FM_STATE_ALARM_ON && player_mode!=PLAYER_MODE_BELL_INI && player_mode!=PLAYER_MODE_BELL_FIN && 
 					get_tit_len(entry)>16 ) 
 			{
 				if (title_delay)
@@ -1983,8 +2018,8 @@ void main(void){
 			if( player_mode != PLAYER_MODE_STOPPED )
 			{
 
-				if ( player_mode == PLAYER_MODE_BELL_RND ||
-					 player_mode == PLAYER_MODE_BELL_SEQ )
+				if ( player_mode == PLAYER_MODE_BELL_INI ||
+					 player_mode == PLAYER_MODE_BELL_FIN )
 				{
 					volume = VOLUME_BELL;
 					song(	cclzero,

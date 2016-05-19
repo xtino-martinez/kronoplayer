@@ -373,6 +373,7 @@ void player_end_of_song()
 	switch( player_mode )
 	{
 		case PLAYER_MODE_MUSIC_NO_BELL:
+		case PLAYER_MODE_MUSIC_BELL:
 			//volume=VOLUME_SONG;
 
 			if( player_one_song )
